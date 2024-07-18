@@ -1,0 +1,163 @@
+local { crypto, http, socket, url } = require "pluto:*"
+
+local gitwit = {}
+
+-- returns a table like: { ["HEAD"] = "<sha1 hash>", ["refs/heads/senpai"] = "<sha1 hash>", ["refs/tags/0.1.0"] = "<sha1 hash>" }
+function gitwit.fetchrefs(url_base)
+    return gitwit.parserefs(gitwit.downloadrefs(url_base))
+end
+
+function gitwit.downloadrefs(url_base)
+    return http.request(url_base.."/info/refs?service=git-upload-pack")
+end
+
+function gitwit.parserefs(data)
+    local i = 1
+    local unpacked = ""
+    while i < #data do
+        local chunk_size = tonumber(data:sub(i, i + 3), 16)
+        if chunk_size < 4 then
+            chunk_size = 4
+        end
+        unpacked ..= data:sub(i + 4, i + chunk_size - 1)
+        i += chunk_size
+    end
+    local refs = {}
+    for unpacked:split("\n") as line do
+        if #line ~= 0 and line[1] ~= "#" then
+            local [hash, ref] = line:split("\0")[1]:split(" ")
+            refs[ref] = hash
+        end
+    end
+    return refs
+end
+
+function gitwit.fetchpackfile(url_base, commit_hash)
+    return gitwit.parsepackfile(gitwit.downloadpackfile(url_base, commit_hash))
+end
+
+function gitwit.downloadpackfile(url_base, commit_hash)
+    if commit_hash == nil then
+        commit_hash = gitwit.fetchrefs(url_base).HEAD
+    end
+    assert(#commit_hash == 40)
+    local { host, path } = url.parse(url_base.."/git-upload-pack")
+    local s = socket.connect(host, 443)
+    assert(s, "failed to connect to "..host)
+    assert(s:starttls(host), "failed to establish a secure tunnel to "..host)
+    -- This is what my client sent with 'git clone --no-checkout --depth=1'
+    -- I didn't get a response with anything else, so I'm not changing anything about this I don't have to.
+    local body = "0011command=fetch001eagent=git/2.40.0.windows.10016object-format=sha10001000dthin-pack000finclude-tag000dofs-delta000cdeepen 10032want "..commit_hash.."\n"
+            .. "0032want "..commit_hash.."\n"
+            .. "0009done\n"
+            .. "0000"
+    s:send("POST "..path.." HTTP/1.0\r\n"
+        .. "Host: "..host.."\r\n"
+        .. "User-Agent: PlutoLang/gitwit\r\n"
+        .. "Git-Protocol: version=2\r\n"
+        .. "Content-Type: application/x-git-upload-pack-request\r\n"
+        .. "Content-Length: "..#body.."\r\n"
+        .. "\r\n"
+        .. body
+        )
+    -- Now we gotta parse this shit: https://git-scm.com/docs/gitprotocol-v2
+    -- I don't wanna handle a pkt-line possibly being sent over multiple TLS records, so we're buffering it first.
+    local data = ""
+    while chunk := s:recv() do
+        data ..= chunk
+    end
+    data = data:sub(data:find("\r\n\r\n") + 4)
+    local i = 1
+    local packfile = ""
+    while true do
+        local chunk_size = tonumber(data:sub(i, i + 3), 16)
+        --print(chunk_size)
+        --if data:sub(i + 4, i + 4) == "\2" then
+            --print(data:sub(i + 5, i + chunk_size - 1))
+        --end
+        if data:sub(i + 4, i + 4) == "\1" then
+            packfile ..= data:sub(i + 5, i + chunk_size - 1)
+        end
+        if chunk_size == 0 then
+            break
+        end
+        i += chunk_size
+    end
+    return packfile
+end
+
+-- https://git-scm.com/docs/gitformat-pack
+-- https://github.com/robisonsantos/packfile_reader
+local typenames <const> = { "commit", "tree", "blob", "tag" }
+function gitwit.parsepackfile(packfile)
+    local objects = {}
+    assert(packfile:sub(1, 4) == "PACK")
+    assert(string.unpack(">I4", packfile, 5) == 2)
+    local num_objects = string.unpack(">I4", packfile, 9)
+    local i = 13
+    for obj = 1, num_objects do
+        local byte = packfile:byte(i)
+        local type = (byte >> 4) & 0b111
+        assert(type ~= 0)
+        local length = byte & 0b1111
+        local has_more = (byte >> 7) ~= 0
+        local shift = 4
+        while has_more do
+            i += 1
+            byte = packfile:byte(i)
+            length |= (byte & 0b1111111) << shift
+            shift += 7
+            has_more = (byte >> 7) ~= 0
+        end
+        i += 1
+        if type == 6 then
+            -- OBJ_OFS_DELTA has an offset before the compressed data
+            while (packfile:byte(i) >> 7) ~= 0 do
+                i += 1
+            end
+            i += 1
+        end
+        local decompressed, info = crypto.deflate(packfile:sub(i))
+        if type <= #typenames then
+            local data = decompressed
+            if type == 2 then
+                data = gitwit.parsetree(data)
+            end
+            objects:insert({
+                type = typenames[type],
+                data = data,
+                hash = crypto.sha1(typenames[type].." "..length.."\0"..decompressed),
+            })
+        end
+        i += info.compressed_size
+    end
+    return objects
+end
+
+function gitwit.parsetree(data)
+    local files = {}
+    local i = 1
+    while i < #data do
+        local file = {
+            mode = "",
+            name = "",
+            hash = "",
+        }
+        while i < #data and data[i] ~= " " do
+            file.mode ..= data[i]
+            i += 1
+        end
+        i += 1
+        while i < #data and data[i] ~= "\0" do
+            file.name ..= data[i]
+            i += 1
+        end
+        i += 1
+        file.hash = data:sub(i, i + 19):split(""):map(|x| -> string.format("%02x", x:byte())):concat("")
+        i += 20
+        files:insert(file)
+    end
+    return files
+end
+
+return gitwit
