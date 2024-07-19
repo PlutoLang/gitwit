@@ -222,6 +222,10 @@ function gitwit.parsepackfile(packfile)
     return objects
 end
 
+function gitwit.blobhash(data)
+    return crypto.sha1("blob "..#data.."\0"..data)
+end
+
 function gitwit.parsetree(data)
     local files = {}
     local i = 1
