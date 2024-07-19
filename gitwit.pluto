@@ -104,16 +104,13 @@ function gitwit.parsepackfile(packfile)
         i += 1
         local type = (byte >> 4) & 0b111
         assert(type ~= 0)
-        local length = byte & 0b1111
-        local has_more = (byte >> 7) ~= 0
-        local shift = 4
-        while has_more do
+
+        -- skip uncompressed length
+        while (byte >> 7) ~= 0 do
             byte = packfile:byte(i)
             i += 1
-            length |= (byte & 0b1111111) << shift
-            shift += 7
-            has_more = (byte >> 7) ~= 0
         end
+
         local offset
         if type == 6 then
             -- OBJ_OFS_DELTA has an offset before the compressed data
@@ -121,7 +118,7 @@ function gitwit.parsepackfile(packfile)
             byte = packfile:byte(i)
             i += 1
             offset = (byte & 0b1111111)
-            has_more = (byte >> 7) ~= 0
+            local has_more = (byte >> 7) ~= 0
             while has_more do
                 byte = packfile:byte(i)
                 i += 1
@@ -131,23 +128,27 @@ function gitwit.parsepackfile(packfile)
             end
             offset = (obj_offset - offset)
         end
+
         local decompressed, info = crypto.deflate(packfile:sub(i))
+
         if type == 6 then
             local base = objects:find(|x| -> x.offset == offset)
             type = base.typeid
             local data = {}
             local j = 1
+
             -- skip size of base object
             while (decompressed:byte(j) >> 7) ~= 0 do
                 j += 1
             end
             j += 1
+
             -- skip size of undeltified object
             while (decompressed:byte(j) >> 7) ~= 0 do
                 j += 1
             end
             j += 1
-            -- undeltify
+
             while j < #decompressed do
                 local insn = decompressed:byte(j)
                 j += 1
@@ -195,8 +196,8 @@ function gitwit.parsepackfile(packfile)
                 end
             end
             decompressed = data:concat("")
-            length = #decompressed
         end
+
         if type <= #typenames then
             local data = decompressed
             if type == 2 then
@@ -206,10 +207,11 @@ function gitwit.parsepackfile(packfile)
                 typeid = type,
                 type = typenames[type],
                 data = data,
-                hash = crypto.sha1(typenames[type].." "..length.."\0"..decompressed),
+                hash = crypto.sha1(typenames[type].." "..#decompressed.."\0"..decompressed),
                 offset = obj_offset,
             })
         end
+
         i += info.compressed_size
     end
     return objects
