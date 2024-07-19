@@ -226,24 +226,25 @@ function gitwit.parsetree(data)
     local files = {}
     local i = 1
     while i < #data do
-        local file = {
-            mode = "",
-            name = "",
-            hash = "",
-        }
+        local mode = {}
+        local name = {}
         while i < #data and data[i] ~= " " do
-            file.mode ..= data[i]
+            mode:insert(data[i])
             i += 1
         end
         i += 1
         while i < #data and data[i] ~= "\0" do
-            file.name ..= data[i]
+            name:insert(data[i])
             i += 1
         end
         i += 1
-        file.hash = data:sub(i, i + 19):split(""):map(|x| -> string.format("%02x", x:byte())):concat("")
+        local hash = data:sub(i, i + 19):split(""):map(|x| -> string.format("%02x", x:byte())):concat("")
         i += 20
-        files:insert(file)
+        files:insert({
+            mode = mode:concat(""),
+            name = name:concat(""),
+            hash = hash,
+        })
     end
     return files
 end
