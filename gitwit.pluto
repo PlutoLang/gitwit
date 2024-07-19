@@ -105,10 +105,15 @@ function gitwit.parsepackfile(packfile)
         local type = (byte >> 4) & 0b111
         assert(type ~= 0)
 
-        -- skip uncompressed length
-        while (byte >> 7) ~= 0 do
+        local length = byte & 0b1111
+        local has_more = (byte >> 7) ~= 0
+        local shift = 4
+        while has_more do
             byte = packfile:byte(i)
             i += 1
+            length |= (byte & 0b1111111) << shift
+            shift += 7
+            has_more = (byte >> 7) ~= 0
         end
 
         local offset
@@ -118,7 +123,7 @@ function gitwit.parsepackfile(packfile)
             byte = packfile:byte(i)
             i += 1
             offset = (byte & 0b1111111)
-            local has_more = (byte >> 7) ~= 0
+            has_more = (byte >> 7) ~= 0
             while has_more do
                 byte = packfile:byte(i)
                 i += 1
@@ -129,7 +134,7 @@ function gitwit.parsepackfile(packfile)
             offset = (obj_offset - offset)
         end
 
-        local decompressed, info = crypto.deflate(packfile:sub(i))
+        local decompressed, info = crypto.deflate(packfile:sub(i), length)
 
         if type == 6 then
             local base = objects:find(|x| -> x.offset == offset)
