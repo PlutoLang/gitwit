@@ -1,4 +1,7 @@
-local { crypto, http, socket, url } = require "pluto:*"
+local crypto = require "pluto:crypto"
+local http = require "pluto:http"
+local socket = require "pluto:socket"
+local url = require "pluto:url"
 
 local gitwit = {}
 
