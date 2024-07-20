@@ -253,4 +253,29 @@ function gitwit.parsetree(data)
     return files
 end
 
+function gitwit.listallfiles(objects)
+    local root_tree = objects:find(|x| -> x.type == "tree")
+    assert(root_tree)
+    local files = {}
+    gitwit.listallfilesaux(objects, files, "", root_tree)
+    return files
+end
+
+function gitwit.listallfilesaux(objects, files, prefix, tree)
+    for tree.data as file do
+        if file.mode == "40000" then
+            local data = objects:find(|x| -> x.hash == file.hash)
+            assert(data)
+            gitwit.listallfilesaux(objects, files, prefix .. file.name .. "/", data)
+        else
+            files:insert({
+                mode = file.mode,
+                name = file.name,
+                path = prefix .. file.name,
+                hash = file.hash,
+            })
+        end
+    end
+end
+
 return gitwit
