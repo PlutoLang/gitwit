@@ -104,6 +104,7 @@ function gitwit.downloadfullpackfile(url_base, commit_hash)
     return downloadpackfileaux(url_base, body)
 end
 
+-- Downloads a diff from "have" to "want". Note that this only works forwards in time. The objects from "have" have to be passed into parsepackfile's base_objects parameter.
 function gitwit.downloadpartialpackfile(url_base, want, have)
     assert(#want == 40)
     assert(#have == 40)
