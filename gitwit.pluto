@@ -39,21 +39,11 @@ function gitwit.fetchpackfile(url_base, commit_hash)
     return gitwit.parsepackfile(gitwit.downloadpackfile(url_base, commit_hash))
 end
 
-function gitwit.downloadpackfile(url_base, commit_hash)
-    if commit_hash == nil then
-        commit_hash = gitwit.fetchrefs(url_base).HEAD
-    end
-    assert(#commit_hash == 40)
+local function downloadpackfileaux(url_base, body)
     local { host, path } = url.parse(url_base.."/git-upload-pack")
     local s = socket.connect(host, 443)
     assert(s, "failed to connect to "..host)
     assert(s:starttls(host), "failed to establish a secure tunnel to "..host)
-    -- This is what my client sent with 'git clone --no-checkout --depth=1'
-    -- I didn't get a response with anything else, so I'm not changing anything about this I don't have to.
-    local body = "0011command=fetch001eagent=git/2.40.0.windows.10016object-format=sha10001000dthin-pack000finclude-tag000dofs-delta000cdeepen 10032want "..commit_hash.."\n"
-            .. "0032want "..commit_hash.."\n"
-            .. "0009done\n"
-            .. "0000"
     s:send("POST "..path.." HTTP/1.0\r\n"
         .. "Host: "..host.."\r\n"
         .. "User-Agent: PlutoLang/gitwit\r\n"
@@ -89,6 +79,30 @@ function gitwit.downloadpackfile(url_base, commit_hash)
     return packfile
 end
 
+function gitwit.downloadpackfile(url_base, commit_hash)
+    if commit_hash == nil then
+        commit_hash = gitwit.fetchrefs(url_base).HEAD
+    end
+    assert(#commit_hash == 40)
+    -- This is what my client sent with 'git clone --no-checkout --depth=1'
+    local body = "0011command=fetch001eagent=git/2.40.0.windows.10016object-format=sha10001000dthin-pack000finclude-tag000dofs-delta000cdeepen 10032want "..commit_hash.."\n"
+            .. "0032want "..commit_hash.."\n"
+            .. "0009done\n"
+            .. "0000"
+    return downloadpackfileaux(url_base, body)
+end
+
+function gitwit.downloadpartialpackfile(url_base, want, have)
+    assert(#want == 40)
+    assert(#have == 40)
+    local body = "0011command=fetch001eagent=git/2.40.0.windows.10016object-format=sha10001000dthin-pack000finclude-tag000dofs-delta000cdeepen 10032want "..want.."\n0032have "..have.."\n"
+            .. "0032want "..want.."\n"
+            .. "0032have "..have.."\n"
+            .. "0009done\n"
+            .. "0000"
+    return downloadpackfileaux(url_base, body)
+end
+
 -- https://git-scm.com/docs/gitformat-pack
 -- https://github.com/robisonsantos/packfile_reader
 local typenames <const> = { "commit", "tree", "blob", "tag" }
@@ -118,7 +132,7 @@ function gitwit.parsepackfile(packfile)
 
         local offset
         if type == 6 then
-            -- OBJ_OFS_DELTA has an offset before the compressed data
+            -- OBJ_OFS_DELTA, has an offset before the compressed data
             -- https://github.com/git/git/blob/26e47e261e969491ad4e3b6c298450c061749c9e/builtin/pack-objects.c#L1443-L1473
             byte = packfile:byte(i)
             i += 1
@@ -132,6 +146,10 @@ function gitwit.parsepackfile(packfile)
                 has_more = (byte >> 7) ~= 0
             end
             offset = (obj_offset - offset)
+        elseif type == 7 then
+            -- OBJ_REF_DELTA, has an object hash before the compressed data
+            --local base_hash = packfile:sub(i, i + 19):split(""):map(|x| -> string.format("%02x", x:byte())):concat("")
+            i += 20
         end
 
         local decompressed, info = crypto.deflate(packfile:sub(i), length)
@@ -201,6 +219,8 @@ function gitwit.parsepackfile(packfile)
                 end
             end
             decompressed = data:concat("")
+        elseif type == 7 then
+            -- I think this is the same as OBJ_OFS_DELTA, just the object is not in this packfile.
         end
 
         if type <= #typenames then
