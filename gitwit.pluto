@@ -92,6 +92,18 @@ function gitwit.downloadpackfile(url_base, commit_hash)
     return downloadpackfileaux(url_base, body)
 end
 
+function gitwit.downloadfullpackfile(url_base, commit_hash)
+    if commit_hash == nil then
+        commit_hash = gitwit.fetchrefs(url_base).HEAD
+    end
+    assert(#commit_hash == 40)
+    local body = "0011command=fetch001eagent=git/2.40.0.windows.10016object-format=sha10001000dthin-pack000finclude-tag000dofs-delta0032want "..commit_hash.."\n"
+            .. "0032want "..commit_hash.."\n"
+            .. "0009done\n"
+            .. "0000"
+    return downloadpackfileaux(url_base, body)
+end
+
 function gitwit.downloadpartialpackfile(url_base, want, have)
     assert(#want == 40)
     assert(#have == 40)
