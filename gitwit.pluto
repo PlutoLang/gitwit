@@ -242,7 +242,9 @@ function gitwit.parsepackfile(packfile, base_objects)
 
         if type <= #typenames then
             local data = decompressed
-            if type == 2 then
+            if type == 1 then
+                data = gitwit.parsecommit(data)
+            elseif type == 2 then
                 data = gitwit.parsetree(data)
             end
             objects:insert({
@@ -267,6 +269,18 @@ end
 
 function gitwit.blobhash(data)
     return crypto.sha1("blob "..#data.."\0"..data)
+end
+
+function gitwit.parsecommit(data)
+    local sep = data:find("\n\n")
+    local commit = {
+        message = data:sub(sep + 2):rstrip("\n")
+    }
+    for data:sub(1, sep - 1):split("\n") as line do
+        sep = line:find(" ")
+        commit[line:sub(1, sep - 1)] = line:sub(sep + 1)
+    end
+    return commit
 end
 
 function gitwit.parsetree(data)
