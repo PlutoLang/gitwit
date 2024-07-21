@@ -309,9 +309,7 @@ function gitwit.parsetree(data)
     return files
 end
 
-function gitwit.listallfiles(objects)
-    local root_tree = objects:find(|x| -> x.type == "tree")
-    assert(root_tree)
+function gitwit.listallfiles(objects, root_tree)
     local files = {}
     gitwit.listallfilesaux(objects, files, "", root_tree)
     return files
