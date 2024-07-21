@@ -229,11 +229,16 @@ function gitwit.parsepackfile(packfile, base_objects)
             if type == 2 then
                 data = gitwit.parsetree(data)
             end
+            local compressed
+            if not base then
+                compressed = packfile:sub(i, i + info.compressed_size - 1)
+            end
             objects:insert({
                 typeid = type,
                 type = typenames[type],
                 data = data,
                 raw_data = decompressed,
+                raw_data_compressed = compressed,
                 hash = crypto.sha1(typenames[type].." "..#decompressed.."\0"..decompressed),
                 offset = obj_offset,
             })
@@ -298,6 +303,44 @@ function gitwit.listallfilesaux(objects, files, prefix, tree)
             })
         end
     end
+end
+
+function gitwit.createpackfile(objects)
+    local data = { "PACK", string.pack(">I4I4", 2, #objects) }
+    for objects as object do
+        local length = #object.raw_data
+        local byte = length & 0b1111
+        length >>= 4
+        byte |= (object.typeid << 4)
+        if length ~= 0 then
+            byte |= 0x80
+        end
+        data:insert(string.char(byte))
+        while length ~= 0 do
+            byte = length & 0x7f
+            length >>= 7
+            if length ~= 0 then
+                byte |= 0x80
+            end
+            data:insert(string.char(byte))
+        end
+
+        if object.raw_data_compressed then
+            data:insert(object.raw_data_compressed)
+        else
+            length = #object.raw_data
+            local i = 1
+            while length >= 0xffff do
+                data:insert(string.pack("<I1I2I2", 0, 0xffff, 0))
+                data:insert(object.raw_data:sub(i, i + 0xfffe))
+                i += 0xffff
+                length -= 0xffff
+            end
+            data:insert(string.pack("<I1I2I2", 1, length, length ~ 0xffff))
+            data:insert(object.raw_data:sub(i))
+        end
+    end
+    return data:concat("")
 end
 
 return gitwit
