@@ -106,7 +106,7 @@ end
 -- https://git-scm.com/docs/gitformat-pack
 -- https://github.com/robisonsantos/packfile_reader
 local typenames <const> = { "commit", "tree", "blob", "tag" }
-function gitwit.parsepackfile(packfile)
+function gitwit.parsepackfile(packfile, base_objects)
     local objects = {}
     assert(packfile:sub(1, 4) == "PACK")
     assert(string.unpack(">I4", packfile, 5) == 2)
@@ -130,13 +130,13 @@ function gitwit.parsepackfile(packfile)
             has_more = (byte >> 7) ~= 0
         end
 
-        local offset
+        local base
         if type == 6 then
             -- OBJ_OFS_DELTA, has an offset before the compressed data
             -- https://github.com/git/git/blob/26e47e261e969491ad4e3b6c298450c061749c9e/builtin/pack-objects.c#L1443-L1473
             byte = packfile:byte(i)
             i += 1
-            offset = (byte & 0b1111111)
+            local offset = (byte & 0b1111111)
             has_more = (byte >> 7) ~= 0
             while has_more do
                 byte = packfile:byte(i)
@@ -146,16 +146,19 @@ function gitwit.parsepackfile(packfile)
                 has_more = (byte >> 7) ~= 0
             end
             offset = (obj_offset - offset)
+            base = objects:find(|x| -> x.offset == offset)
         elseif type == 7 then
             -- OBJ_REF_DELTA, has an object hash before the compressed data
-            --local base_hash = packfile:sub(i, i + 19):split(""):map(|x| -> string.format("%02x", x:byte())):concat("")
+            if base_objects then
+                local base_hash = packfile:sub(i, i + 19):split(""):map(|x| -> string.format("%02x", x:byte())):concat("")
+                base = base_objects:find(|x| -> x.hash == base_hash)
+            end
             i += 20
         end
 
         local decompressed, info = crypto.deflate(packfile:sub(i), length)
 
-        if type == 6 then
-            local base = objects:find(|x| -> x.offset == offset)
+        if type == 6 or type == 7 then
             type = base.typeid
             local data = {}
             local j = 1
@@ -215,12 +218,10 @@ function gitwit.parsepackfile(packfile)
                         cp_size = 0x10000
                     end
                     cp_offset += 1
-                    data:insert(base.data:sub(cp_offset, cp_offset + cp_size - 1))
+                    data:insert(base.raw_data:sub(cp_offset, cp_offset + cp_size - 1))
                 end
             end
             decompressed = data:concat("")
-        elseif type == 7 then
-            -- I think this is the same as OBJ_OFS_DELTA, just the object is not in this packfile.
         end
 
         if type <= #typenames then
@@ -232,6 +233,7 @@ function gitwit.parsepackfile(packfile)
                 typeid = type,
                 type = typenames[type],
                 data = data,
+                raw_data = decompressed,
                 hash = crypto.sha1(typenames[type].." "..#decompressed.."\0"..decompressed),
                 offset = obj_offset,
             })
