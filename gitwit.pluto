@@ -123,17 +123,8 @@ end
 local typenames <const> = { "commit", "tree", "blob", "tag" }
 function gitwit.parsepackfile(packfile, base_objects)
     local objects = {}
-    local i = 1
-    ::retry::
-    -- Try to locate "PACK", which may be slightly offset in the case of a bundle file: https://git-scm.com/docs/gitformat-bundle
-    local magic = packfile:sub(i, i + 3)
-    if magic ~= "PACK" then
-        ++i
-        if i + 20 > #packfile then
-            error("Invalid packfile")
-        end
-        goto retry
-    end
+    local i = packfile:find("PACK") -- Try to locate "PACK", which may be slightly offset in the case of a bundle file: https://git-scm.com/docs/gitformat-bundle
+    assert(i, "Invalid packfile")
     i += 4
     local format, num_objects
     format, i = string.unpack(">I4", packfile, i)
