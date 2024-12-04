@@ -139,7 +139,7 @@ function gitwit.parsepackfile(packfile, base_objects)
     format, i = string.unpack(">I4", packfile, i)
     assert(format == 2, "Invalid packfile")
     num_objects, i = string.unpack(">I4", packfile, i)
-    for obj = 1, num_objects do
+    for _obj = 1, num_objects do
         local obj_offset = i
         local byte = packfile:byte(i)
         i += 1
