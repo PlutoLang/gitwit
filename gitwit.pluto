@@ -174,7 +174,8 @@ function gitwit.parsepackfile(packfile, base_objects)
             i += 20
         end
 
-        local decompressed, info = crypto.decompress(packfile:sub(i), length)
+        --local decompressed, info = crypto.decompress(packfile:sub(i), length)
+        local decompressed, info = crypto.decompress(packfile, i, length) -- Pluto 0.12.0
 
         if type == 6 or type == 7 then
             type = base.typeid
